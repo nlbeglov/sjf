@@ -1,14 +1,40 @@
 package com.nlbeglov.scheduler.ui;
 
+import com.nlbeglov.scheduler.core.SJFWithPriorityScheduler;
+import com.nlbeglov.scheduler.core.SchedulerConfig;
+import com.nlbeglov.scheduler.core.SchedulingMode;
+import com.nlbeglov.scheduler.model.ScheduledProcess;
+import com.nlbeglov.scheduler.model.SimulationStats;
+import com.nlbeglov.scheduler.sim.SimulationEngine;
+import com.nlbeglov.scheduler.sim.SimulationListener;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.geometry.Insets;
 import javafx.geometry.Orientation;
 import javafx.scene.Parent;
+import javafx.scene.Scene;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
-import javafx.scene.control.*;
-import javafx.scene.layout.*;
+import javafx.scene.control.Button;
+import javafx.scene.control.ButtonBar;
+import javafx.scene.control.ButtonType;
+import javafx.scene.control.CheckBox;
+import javafx.scene.control.Dialog;
+import javafx.scene.control.Label;
+import javafx.scene.control.ListView;
+import javafx.scene.control.RadioButton;
+import javafx.scene.control.Separator;
+import javafx.scene.control.TableColumn;
+import javafx.scene.control.TableRow;
+import javafx.scene.control.TableView;
+import javafx.scene.control.TextField;
+import javafx.scene.control.ToggleGroup;
+import javafx.scene.control.Tooltip;
+import javafx.scene.layout.BorderPane;
+import javafx.scene.layout.GridPane;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.SplitPane;
+import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
 import com.nlbeglov.scheduler.core.SJFWithPriorityScheduler;
 import com.nlbeglov.scheduler.core.SchedulerConfig;
@@ -76,7 +102,7 @@ public class MainController implements SimulationListener {
         bottomPane.setDividerPositions(0.5);
 
         root.setLeft(leftPane);
-        root.setCenter(centerTabs);
+        root.setCenter(simulationPane);
         root.setBottom(bottomPane);
     }
 
@@ -84,20 +110,26 @@ public class MainController implements SimulationListener {
         TableColumn<ScheduledProcess, String> idCol = new TableColumn<>("ID");
         idCol.setCellValueFactory(c -> new javafx.beans.property.SimpleStringProperty(c.getValue().getId()));
 
+        TableColumn<ScheduledProcess, Number> prioCol = new TableColumn<>("Приоритет");
+        prioCol.setCellValueFactory(c -> new javafx.beans.property.SimpleIntegerProperty(c.getValue().getBasePriority()));
+
         TableColumn<ScheduledProcess, Number> arrCol = new TableColumn<>("Прибытие");
         arrCol.setCellValueFactory(c -> new javafx.beans.property.SimpleIntegerProperty(c.getValue().getArrivalTime()));
 
         TableColumn<ScheduledProcess, Number> burstCol = new TableColumn<>("Длительность");
         burstCol.setCellValueFactory(c -> new javafx.beans.property.SimpleIntegerProperty(c.getValue().getBurstTime()));
 
-        TableColumn<ScheduledProcess, Number> prioCol = new TableColumn<>("Приоритет");
-        prioCol.setCellValueFactory(c -> new javafx.beans.property.SimpleIntegerProperty(c.getValue().getBasePriority()));
-
-        TableColumn<ScheduledProcess, Number> waitCol = new TableColumn<>("Ожидание");
-        waitCol.setCellValueFactory(c -> new javafx.beans.property.SimpleIntegerProperty(c.getValue().getWaitingTime()));
-
-        processTable.getColumns().addAll(idCol, arrCol, burstCol, prioCol, waitCol);
+        processTable.getColumns().addAll(idCol, prioCol, arrCol, burstCol);
         processTable.setItems(processes);
+        processTable.setRowFactory(tv -> {
+            TableRow<ScheduledProcess> row = new TableRow<>();
+            row.setOnMouseClicked(event -> {
+                if (event.getClickCount() == 2 && !row.isEmpty()) {
+                    editProcessDialog(row.getItem());
+                }
+            });
+            return row;
+        });
     }
 
     private HBox buildProcessButtons() {
@@ -112,6 +144,7 @@ public class MainController implements SimulationListener {
             scheduler.setProcesses(Collections.emptyList());
             engine.reset();
             clearGantt();
+            needsSimulationReload = true;
         });
 
         HBox box = new HBox(10, addBtn, clearBtn);
@@ -165,7 +198,11 @@ public class MainController implements SimulationListener {
         modeHint.setStyle("-fx-font-size: 11px; -fx-text-fill: #555;");
 
         runBtn.setOnAction(e -> {
-            syncSchedulerConfig(preemptiveBtn.isSelected(), agingBox.isSelected());
+            if (needsSimulationReload || scheduler.isFinished()) {
+                prepareSimulation(preemptiveBtn.isSelected(), agingBox.isSelected());
+            } else {
+                syncSchedulerConfig(preemptiveBtn.isSelected(), agingBox.isSelected());
+            }
             engine.start();
         });
         pauseBtn.setOnAction(e -> engine.pause());
@@ -173,14 +210,17 @@ public class MainController implements SimulationListener {
             engine.reset();
             clearGantt();
             logLines.clear();
+            needsSimulationReload = true;
         });
         stepBtn.setOnAction(e -> {
-            syncSchedulerConfig(preemptiveBtn.isSelected(), agingBox.isSelected());
-            if (!engine.isRunning()) {
-                engine.start();
-                engine.step();
-                engine.pause();
+            if (needsSimulationReload || scheduler.isFinished()) {
+                prepareSimulation(preemptiveBtn.isSelected(), agingBox.isSelected());
+            } else {
+                syncSchedulerConfig(preemptiveBtn.isSelected(), agingBox.isSelected());
             }
+            engine.start();
+            engine.step();
+            engine.pause();
         });
 
         box.getChildren().addAll(
@@ -214,11 +254,20 @@ public class MainController implements SimulationListener {
     }
 
     private void addProcessDialog() {
+        showProcessDialog(null);
+    }
+
+    private void editProcessDialog(ScheduledProcess existing) {
+        showProcessDialog(existing);
+    }
+
+    private void showProcessDialog(ScheduledProcess toEdit) {
         Dialog<ScheduledProcess> dialog = new Dialog<>();
-        dialog.setTitle("Добавление процесса");
+        boolean editing = toEdit != null;
+        dialog.setTitle(editing ? "Редактирование процесса" : "Добавление процесса");
 
         Label idLabel = new Label("ID:");
-        TextField idField = new TextField("P" + (processes.size() + 1));
+        TextField idField = new TextField(editing ? toEdit.getId() : "P" + (processes.size() + 1));
         idField.setTooltip(new Tooltip("Идентификатор процесса"));
 
         int randomPriority = random.nextInt(6);
@@ -246,8 +295,9 @@ public class MainController implements SimulationListener {
         grid.addRow(3, bLabel, bField);
         dialog.getDialogPane().setContent(grid);
 
-        ButtonType okType = new ButtonType("Добавить", ButtonBar.ButtonData.OK_DONE);
-        dialog.getDialogPane().getButtonTypes().addAll(okType, ButtonType.CANCEL);
+        ButtonType okType = new ButtonType(editing ? "Сохранить" : "Добавить", ButtonBar.ButtonData.OK_DONE);
+        ButtonType cancelType = new ButtonType("Отмена", ButtonBar.ButtonData.CANCEL_CLOSE);
+        dialog.getDialogPane().getButtonTypes().addAll(okType, cancelType);
 
         dialog.setResultConverter(btn -> {
             if (btn == okType) {
@@ -266,10 +316,18 @@ public class MainController implements SimulationListener {
 
         Optional<ScheduledProcess> res = dialog.showAndWait();
         res.ifPresent(p -> {
-            processes.add(p);
+            if (editing) {
+                int idx = processes.indexOf(toEdit);
+                if (idx >= 0) {
+                    processes.set(idx, p);
+                }
+            } else {
+                processes.add(p);
+            }
             scheduler.setProcesses(cloneProcesses(processes));
             engine.reset();
             clearGantt();
+            needsSimulationReload = true;
         });
     }
 
@@ -291,9 +349,6 @@ public class MainController implements SimulationListener {
 
     @Override
     public void onTimeAdvanced(int time, ScheduledProcess runningProcess, List<ScheduledProcess> snapshot) {
-        // обновляем таблицу
-        processes.setAll(snapshot);
-
         // логика отрисовки Ганта: рисуем по времени time
         if (runningProcess != null) {
             drawGanttSlice(time, runningProcess);
@@ -314,7 +369,7 @@ public class MainController implements SimulationListener {
         Color color = processColors.computeIfAbsent(proc.getId(), id -> randomColor());
         gc.setFill(color);
 
-        double widthPerUnit = 10; // масштаб
+        double widthPerUnit = 20; // масштаб
         double height = 30;
         double y = 20 + (processColors.keySet().stream().sorted().collect(Collectors.toList())
                 .indexOf(proc.getId()) * (height + 5));
