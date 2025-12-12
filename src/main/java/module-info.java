@@ -7,5 +7,4 @@ module com.nlbeglov.scheduler {
     exports com.nlbeglov.scheduler.core;
     exports com.nlbeglov.scheduler.model;
     exports com.nlbeglov.scheduler.sim;
-    exports com.nlbeglov.scheduler.testing;
 }
