@@ -39,6 +39,13 @@
             <artifactId>javafx-controls</artifactId>
             <version>${javafx.version}</version>
         </dependency>
+
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>5.10.2</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
@@ -50,7 +57,16 @@
                 <version>${javafx.maven.plugin.version}</version>
                 <configuration>
                     <!-- Полное имя класса с методом main -->
-                    <mainClass>com.nlbeglov.scheduler.ui.Launcher</mainClass>
+                    <mainClass>com.nlbeglov.scheduler/com.nlbeglov.scheduler.ui.Launcher</mainClass>
+                </configuration>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.1.2</version>
+                <configuration>
+                    <useModulePath>false</useModulePath>
                 </configuration>
             </plugin>
         </plugins>

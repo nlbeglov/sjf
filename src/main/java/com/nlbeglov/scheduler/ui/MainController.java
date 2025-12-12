@@ -60,20 +60,19 @@ public class MainController implements SimulationListener {
     }
 
     private void buildUI() {
-        // left: process table + buttons
         VBox leftPane = new VBox(10);
         leftPane.setPadding(new Insets(10));
         buildProcessTable();
         HBox procButtons = buildProcessButtons();
 
-        leftPane.getChildren().addAll(new Label("Processes"), processTable, procButtons);
+        leftPane.getChildren().addAll(new Label("Процессы"), processTable, procButtons);
 
-        // center: tabs - simulation / load test
         TabPane centerTabs = new TabPane();
+        centerTabs.setTabMinWidth(140);
+        centerTabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
         centerTabs.getTabs().add(buildSimulationTab());
         centerTabs.getTabs().add(buildLoadTestTab());
 
-        // bottom: controls + log
         SplitPane bottomPane = new SplitPane();
         bottomPane.setOrientation(Orientation.HORIZONTAL);
         bottomPane.getItems().add(buildControlPane());
@@ -89,16 +88,16 @@ public class MainController implements SimulationListener {
         TableColumn<ScheduledProcess, String> idCol = new TableColumn<>("ID");
         idCol.setCellValueFactory(c -> new javafx.beans.property.SimpleStringProperty(c.getValue().getId()));
 
-        TableColumn<ScheduledProcess, Number> arrCol = new TableColumn<>("Arrival");
+        TableColumn<ScheduledProcess, Number> arrCol = new TableColumn<>("Прибытие");
         arrCol.setCellValueFactory(c -> new javafx.beans.property.SimpleIntegerProperty(c.getValue().getArrivalTime()));
 
-        TableColumn<ScheduledProcess, Number> burstCol = new TableColumn<>("Burst");
+        TableColumn<ScheduledProcess, Number> burstCol = new TableColumn<>("Длительность");
         burstCol.setCellValueFactory(c -> new javafx.beans.property.SimpleIntegerProperty(c.getValue().getBurstTime()));
 
-        TableColumn<ScheduledProcess, Number> prioCol = new TableColumn<>("Priority");
+        TableColumn<ScheduledProcess, Number> prioCol = new TableColumn<>("Приоритет");
         prioCol.setCellValueFactory(c -> new javafx.beans.property.SimpleIntegerProperty(c.getValue().getBasePriority()));
 
-        TableColumn<ScheduledProcess, Number> waitCol = new TableColumn<>("Waiting");
+        TableColumn<ScheduledProcess, Number> waitCol = new TableColumn<>("Ожидание");
         waitCol.setCellValueFactory(c -> new javafx.beans.property.SimpleIntegerProperty(c.getValue().getWaitingTime()));
 
         processTable.getColumns().addAll(idCol, arrCol, burstCol, prioCol, waitCol);
@@ -106,10 +105,12 @@ public class MainController implements SimulationListener {
     }
 
     private HBox buildProcessButtons() {
-        Button addBtn = new Button("Add");
+        Button addBtn = new Button("Добавить");
+        addBtn.setTooltip(new Tooltip("Добавить новый процесс и пересчитать очередь"));
         addBtn.setOnAction(e -> addProcessDialog());
 
-        Button clearBtn = new Button("Clear");
+        Button clearBtn = new Button("Очистить");
+        clearBtn.setTooltip(new Tooltip("Удалить все процессы и сбросить симуляцию"));
         clearBtn.setOnAction(e -> {
             processes.clear();
             scheduler.setProcesses(Collections.emptyList());
@@ -128,7 +129,7 @@ public class MainController implements SimulationListener {
         pane.setCenter(ganttCanvas);
         clearGantt();
 
-        Tab tab = new Tab("Simulation", pane);
+        Tab tab = new Tab("Симуляция", pane);
         tab.setClosable(false);
         return tab;
     }
@@ -137,25 +138,47 @@ public class MainController implements SimulationListener {
         BorderPane pane = new BorderPane();
         pane.setPadding(new Insets(10));
 
-        // Простая форма параметров и текстовый вывод средних значений
-        VBox controls = new VBox(8);
+        GridPane controls = new GridPane();
+        controls.setHgap(10);
+        controls.setVgap(8);
+
         TextField runsField = new TextField("20");
+        runsField.setTooltip(new Tooltip("Сколько раз сгенерировать нагрузку для усреднения результатов"));
+
         TextField countField = new TextField("50");
+        countField.setTooltip(new Tooltip("Количество процессов в каждом прогоне"));
+
         TextField maxArrivalField = new TextField("50");
+        maxArrivalField.setTooltip(new Tooltip("Максимальное время прихода процесса"));
+
         TextField burstRangeField = new TextField("1-10");
+        burstRangeField.setTooltip(new Tooltip("Диапазон длительности выполнения через дефис (например, 1-10)"));
+
         TextField priorityRangeField = new TextField("0-5");
-        Button runBtn = new Button("Run load test");
+        priorityRangeField.setTooltip(new Tooltip("Диапазон базового приоритета (0 — самый высокий)"));
+
+        Button runBtn = new Button("Запустить тест");
+        runBtn.setTooltip(new Tooltip("Сгенерировать нагрузку и посчитать средние показатели"));
+
+        controls.addRow(0, new Label("Число прогонов:"), runsField);
+        controls.addRow(1, new Label("Кол-во процессов:"), countField);
+        controls.addRow(2, new Label("Максимальное прибытие:"), maxArrivalField);
+        controls.addRow(3, new Label("Диапазон длительности (мин-макс):"), burstRangeField);
+        controls.addRow(4, new Label("Диапазон приоритета (мин-макс):"), priorityRangeField);
+        controls.add(runBtn, 0, 5, 2, 1);
+
+        ColumnConstraints labelCol = new ColumnConstraints();
+        labelCol.setMinWidth(170);
+        ColumnConstraints inputCol = new ColumnConstraints();
+        inputCol.setHgrow(Priority.ALWAYS);
+        controls.getColumnConstraints().addAll(labelCol, inputCol);
+
         TextArea resultArea = new TextArea();
         resultArea.setEditable(false);
-
-        controls.getChildren().addAll(
-                new Label("Runs:"), runsField,
-                new Label("Process count:"), countField,
-                new Label("Max arrival:"), maxArrivalField,
-                new Label("Burst range (min-max):"), burstRangeField,
-                new Label("Priority range (min-max):"), priorityRangeField,
-                runBtn
-        );
+        resultArea.setWrapText(true);
+        resultArea.setPromptText("Здесь появится итог нагрузочного теста");
+        resultArea.setPrefRowCount(12);
+        resultArea.setPrefColumnCount(40);
 
         runBtn.setOnAction(e -> {
             try {
@@ -176,18 +199,27 @@ public class MainController implements SimulationListener {
                 double avgTurn = statsList.stream().mapToDouble(SimulationStats::getAvgTurnaroundTime).average().orElse(0);
 
                 resultArea.setText(String.format(
-                        "Runs: %d%nAvg waiting (avg by runs): %.3f%nAvg turnaround (avg by runs): %.3f",
+                        "Прогонов: %d%nСреднее ожидание: %.3f%nСреднее время обращения: %.3f",
                         runs, avgWait, avgTurn
                 ));
             } catch (Exception ex) {
-                resultArea.setText("Error in parameters: " + ex.getMessage());
+                resultArea.setText("Проверьте параметры: " + ex.getMessage());
             }
         });
 
-        pane.setLeft(controls);
-        pane.setCenter(resultArea);
+        HBox content = new HBox(15, controls, resultArea);
+        content.setPadding(new Insets(5, 0, 0, 0));
+        HBox.setHgrow(resultArea, Priority.ALWAYS);
 
-        Tab tab = new Tab("Load test", pane);
+        ScrollPane scrollPane = new ScrollPane(content);
+        scrollPane.setFitToWidth(true);
+        scrollPane.setFitToHeight(true);
+        scrollPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
+        scrollPane.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
+
+        pane.setCenter(scrollPane);
+
+        Tab tab = new Tab("Нагрузочный тест", pane);
         tab.setClosable(false);
         return tab;
     }
@@ -196,19 +228,24 @@ public class MainController implements SimulationListener {
         VBox box = new VBox(8);
         box.setPadding(new Insets(10));
 
-        Button runBtn = new Button("Run");
-        Button pauseBtn = new Button("Pause");
-        Button stepBtn = new Button("Step");
-        Button resetBtn = new Button("Reset");
+        Button runBtn = new Button("Старт");
+        runBtn.setTooltip(new Tooltip("Запустить симуляцию со всеми текущими процессами"));
+        Button pauseBtn = new Button("Пауза");
+        pauseBtn.setTooltip(new Tooltip("Приостановить симуляцию"));
+        Button stepBtn = new Button("Шаг");
+        stepBtn.setTooltip(new Tooltip("Продвинуть симуляцию на один такт"));
+        Button resetBtn = new Button("Сброс");
+        resetBtn.setTooltip(new Tooltip("Сбросить время, очистить диаграмму Ганта и журнал"));
 
         ToggleGroup modeGroup = new ToggleGroup();
-        RadioButton preemptiveBtn = new RadioButton("Preemptive");
+        RadioButton preemptiveBtn = new RadioButton("Вытесняющий");
         preemptiveBtn.setToggleGroup(modeGroup);
         preemptiveBtn.setSelected(true);
-        RadioButton nonPreemptiveBtn = new RadioButton("Non-preemptive");
+        RadioButton nonPreemptiveBtn = new RadioButton("Невытесняющий");
         nonPreemptiveBtn.setToggleGroup(modeGroup);
 
-        CheckBox agingBox = new CheckBox("Aging");
+        CheckBox agingBox = new CheckBox("Старение приоритета");
+        agingBox.setTooltip(new Tooltip("Со временем ожидания приоритет процесса повышается"));
         agingBox.setSelected(false);
 
         runBtn.setOnAction(e -> {
@@ -231,10 +268,10 @@ public class MainController implements SimulationListener {
         });
 
         box.getChildren().addAll(
-                new Label("Simulation control:"),
+                new Label("Управление симуляцией:"),
                 new HBox(5, runBtn, pauseBtn, stepBtn, resetBtn),
                 new Separator(),
-                new Label("Mode:"),
+                new Label("Режим:"),
                 preemptiveBtn,
                 nonPreemptiveBtn,
                 agingBox
@@ -254,25 +291,30 @@ public class MainController implements SimulationListener {
     private VBox buildLogPane() {
         VBox box = new VBox(5);
         box.setPadding(new Insets(10));
-        box.getChildren().addAll(new Label("Log:"), logList);
+        logList.setPlaceholder(new Label("Сообщения симуляции появятся здесь"));
+        box.getChildren().addAll(new Label("Журнал:"), logList);
         return box;
     }
 
     private void addProcessDialog() {
         Dialog<ScheduledProcess> dialog = new Dialog<>();
-        dialog.setTitle("Add process");
+        dialog.setTitle("Добавление процесса");
 
         Label idLabel = new Label("ID:");
         TextField idField = new TextField("P" + (processes.size() + 1));
+        idField.setTooltip(new Tooltip("Идентификатор процесса"));
 
-        Label aLabel = new Label("Arrival:");
+        Label aLabel = new Label("Прибытие:");
         TextField aField = new TextField("0");
+        aField.setTooltip(new Tooltip("Момент времени, когда процесс становится доступным"));
 
-        Label bLabel = new Label("Burst:");
+        Label bLabel = new Label("Длительность:");
         TextField bField = new TextField("5");
+        bField.setTooltip(new Tooltip("Сколько тиков CPU требуется"));
 
-        Label pLabel = new Label("Priority (0=highest):");
+        Label pLabel = new Label("Приоритет (0 — высший):");
         TextField pField = new TextField("1");
+        pField.setTooltip(new Tooltip("Меньшее значение — более высокий приоритет"));
 
         GridPane grid = new GridPane();
         grid.setHgap(8);
@@ -283,7 +325,7 @@ public class MainController implements SimulationListener {
         grid.addRow(3, pLabel, pField);
         dialog.getDialogPane().setContent(grid);
 
-        ButtonType okType = new ButtonType("Add", ButtonBar.ButtonData.OK_DONE);
+        ButtonType okType = new ButtonType("Добавить", ButtonBar.ButtonData.OK_DONE);
         dialog.getDialogPane().getButtonTypes().addAll(okType, ButtonType.CANCEL);
 
         dialog.setResultConverter(btn -> {
@@ -339,11 +381,11 @@ public class MainController implements SimulationListener {
 
         // лог: можно писать менее подробно, но для наглядности — так
         if (runningProcess != null) {
-            onLogEvent(String.format("t=%d: running %s (prio=%d, rem=%d)",
+            onLogEvent(String.format("t=%d: выполняется %s (приор.=%d, осталось=%d)",
                     time, runningProcess.getId(), runningProcess.getEffectivePriority(),
                     runningProcess.getRemainingTime()));
         } else {
-            onLogEvent(String.format("t=%d: CPU idle", time));
+            onLogEvent(String.format("t=%d: ЦП простаивает", time));
         }
     }
 
@@ -378,9 +420,9 @@ public class MainController implements SimulationListener {
 
     @Override
     public void onSimulationFinished() {
-        onLogEvent("Simulation finished");
+        onLogEvent("Симуляция завершена");
         SimulationStats stats = SimulationStats.fromProcesses(new ArrayList<>(scheduler.getAllProcesses()));
-        onLogEvent(String.format("Avg waiting=%.3f, avg turnaround=%.3f",
+        onLogEvent(String.format("Среднее ожидание=%.3f, среднее время обращения=%.3f",
                 stats.getAvgWaitingTime(), stats.getAvgTurnaroundTime()));
     }
 }

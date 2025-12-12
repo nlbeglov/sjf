@@ -8,7 +8,6 @@ import javafx.stage.Stage;
 import javafx.util.Duration;
 import com.nlbeglov.scheduler.core.SJFWithPriorityScheduler;
 import com.nlbeglov.scheduler.core.SchedulerConfig;
-import com.nlbeglov.scheduler.core.SchedulingMode;
 import com.nlbeglov.scheduler.sim.SimulationEngine;
 
 public class MainApp extends Application {
@@ -28,7 +27,7 @@ public class MainApp extends Application {
         timeline.play();
 
         Scene scene = new Scene(controller.getRoot(), 1200, 700);
-        primaryStage.setTitle("SJF with Priority Scheduler Simulator");
+        primaryStage.setTitle("Симулятор планировщика SJF с приоритетами");
         primaryStage.setScene(scene);
         primaryStage.show();
     }
