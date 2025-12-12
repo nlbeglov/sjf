@@ -30,19 +30,14 @@ import javafx.scene.control.TableView;
 import javafx.scene.control.TextField;
 import javafx.scene.control.ToggleGroup;
 import javafx.scene.control.Tooltip;
+import javafx.scene.control.SplitPane;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
-import javafx.scene.layout.SplitPane;
 import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
-import com.nlbeglov.scheduler.core.SJFWithPriorityScheduler;
-import com.nlbeglov.scheduler.core.SchedulerConfig;
-import com.nlbeglov.scheduler.core.SchedulingMode;
-import com.nlbeglov.scheduler.model.ScheduledProcess;
-import com.nlbeglov.scheduler.model.SimulationStats;
-import com.nlbeglov.scheduler.sim.SimulationEngine;
-import com.nlbeglov.scheduler.sim.SimulationListener;
+import javafx.scene.text.Font;
+import javafx.stage.Stage;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -65,6 +60,7 @@ public class MainController implements SimulationListener {
     private final Map<String, Color> processColors = new HashMap<>();
 
     private final Random random = new Random();
+    private boolean needsSimulationReload = true;
 
     public MainController(SJFWithPriorityScheduler scheduler, SchedulerConfig config) {
         this.scheduler = scheduler;
@@ -90,10 +86,7 @@ public class MainController implements SimulationListener {
 
         leftPane.getChildren().addAll(new Label("Процессы"), processTable, procButtons);
 
-        TabPane centerTabs = new TabPane();
-        centerTabs.setTabMinWidth(140);
-        centerTabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
-        centerTabs.getTabs().add(buildSimulationTab());
+        VBox simulationPane = buildSimulationPane();
 
         SplitPane bottomPane = new SplitPane();
         bottomPane.setOrientation(Orientation.HORIZONTAL);
@@ -151,16 +144,16 @@ public class MainController implements SimulationListener {
         return box;
     }
 
-    private Tab buildSimulationTab() {
-        BorderPane pane = new BorderPane();
+    private VBox buildSimulationPane() {
+        VBox pane = new VBox(6);
         pane.setPadding(new Insets(10));
 
-        pane.setCenter(ganttCanvas);
-        clearGantt();
+        Label title = new Label("Симуляция");
+        title.setStyle("-fx-font-size: 14px; -fx-font-weight: bold;");
 
-        Tab tab = new Tab("Симуляция", pane);
-        tab.setClosable(false);
-        return tab;
+        pane.getChildren().addAll(title, ganttCanvas);
+        clearGantt();
+        return pane;
     }
 
     private VBox buildControlPane() {
@@ -189,6 +182,9 @@ public class MainController implements SimulationListener {
         agingBox.setTooltip(new Tooltip("Со временем ожидания приоритет процесса повышается"));
         agingBox.setSelected(false);
 
+        Button resultsBtn = new Button("Итоги симуляции");
+        resultsBtn.setOnAction(e -> showResultsWindow());
+
         Label modeHint = new Label(
                 "Вытесняющий режим подходит для интерактивных задач: как только приходит более важный процесс, " +
                         "процессор переключается на него. В невытесняющем режиме процесс всегда дорабатывает квант до конца, " +
@@ -196,6 +192,10 @@ public class MainController implements SimulationListener {
         );
         modeHint.setWrapText(true);
         modeHint.setStyle("-fx-font-size: 11px; -fx-text-fill: #555;");
+
+        preemptiveBtn.setOnAction(e -> needsSimulationReload = true);
+        nonPreemptiveBtn.setOnAction(e -> needsSimulationReload = true);
+        agingBox.setOnAction(e -> needsSimulationReload = true);
 
         runBtn.setOnAction(e -> {
             if (needsSimulationReload || scheduler.isFinished()) {
@@ -231,6 +231,7 @@ public class MainController implements SimulationListener {
                 preemptiveBtn,
                 nonPreemptiveBtn,
                 agingBox,
+                resultsBtn,
                 modeHint
         );
         return box;
@@ -275,15 +276,15 @@ public class MainController implements SimulationListener {
         int randomBurst = random.nextInt(10) + 1;
 
         Label pLabel = new Label("Приоритет (0 — высший):");
-        TextField pField = new TextField(String.valueOf(randomPriority));
+        TextField pField = new TextField(String.valueOf(editing ? toEdit.getBasePriority() : randomPriority));
         pField.setTooltip(new Tooltip("Меньшее значение — более высокий приоритет"));
 
         Label aLabel = new Label("Прибытие:");
-        TextField aField = new TextField(String.valueOf(randomArrival));
+        TextField aField = new TextField(String.valueOf(editing ? toEdit.getArrivalTime() : randomArrival));
         aField.setTooltip(new Tooltip("Момент времени, когда процесс становится доступным"));
 
         Label bLabel = new Label("Длительность CPU:");
-        TextField bField = new TextField(String.valueOf(randomBurst));
+        TextField bField = new TextField(String.valueOf(editing ? toEdit.getBurstTime() : randomBurst));
         bField.setTooltip(new Tooltip("Сколько тиков CPU требуется"));
 
         GridPane grid = new GridPane();
@@ -380,6 +381,7 @@ public class MainController implements SimulationListener {
         gc.strokeRect(x, y, widthPerUnit, height);
 
         gc.setFill(textColorFor(color));
+        gc.setFont(Font.font(11));
         gc.fillText(proc.getId(), x + 2, y + height - 8);
     }
 
@@ -407,6 +409,7 @@ public class MainController implements SimulationListener {
         onLogEvent(String.format("Среднее ожидание=%.3f, среднее время обращения=%.3f",
                 stats.getAvgWaitingTime(), stats.getAvgTurnaroundTime()));
         appendProcessSummary(scheduler.getAllProcesses());
+        needsSimulationReload = true;
     }
 
     private void appendProcessSummary(List<ScheduledProcess> finishedProcesses) {
@@ -424,5 +427,66 @@ public class MainController implements SimulationListener {
                         p.getWaitingTime(),
                         p.getTurnaroundTime()
                 )));
+    }
+
+    private void prepareSimulation(boolean preemptive, boolean aging) {
+        syncSchedulerConfig(preemptive, aging);
+        scheduler.setProcesses(cloneProcesses(processes));
+        engine.reset();
+        clearGantt();
+        needsSimulationReload = false;
+    }
+
+    private void showResultsWindow() {
+        TableView<ProcessResult> resultsTable = new TableView<>();
+        resultsTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_ALL_COLUMNS);
+
+        TableColumn<ProcessResult, String> idCol = new TableColumn<>("Процесс");
+        idCol.setCellValueFactory(c -> new javafx.beans.property.SimpleStringProperty(c.getValue().id()));
+
+        TableColumn<ProcessResult, Number> prioCol = new TableColumn<>("Приоритет");
+        prioCol.setCellValueFactory(c -> new javafx.beans.property.SimpleIntegerProperty(c.getValue().priority()));
+
+        TableColumn<ProcessResult, Number> arrCol = new TableColumn<>("Время прибытия");
+        arrCol.setCellValueFactory(c -> new javafx.beans.property.SimpleIntegerProperty(c.getValue().arrival()));
+
+        TableColumn<ProcessResult, Number> burstCol = new TableColumn<>("Длительность CPU");
+        burstCol.setCellValueFactory(c -> new javafx.beans.property.SimpleIntegerProperty(c.getValue().burst()));
+
+        TableColumn<ProcessResult, Number> finishCol = new TableColumn<>("Время завершения");
+        finishCol.setCellValueFactory(c -> new javafx.beans.property.SimpleIntegerProperty(c.getValue().finish()));
+
+        TableColumn<ProcessResult, Number> waitCol = new TableColumn<>("Время ожидания");
+        waitCol.setCellValueFactory(c -> new javafx.beans.property.SimpleIntegerProperty(c.getValue().waiting()));
+
+        TableColumn<ProcessResult, Number> turnCol = new TableColumn<>("Время пребывания");
+        turnCol.setCellValueFactory(c -> new javafx.beans.property.SimpleIntegerProperty(c.getValue().turnaround()));
+
+        resultsTable.getColumns().addAll(idCol, prioCol, arrCol, burstCol, finishCol, waitCol, turnCol);
+        List<ProcessResult> data = scheduler.getAllProcesses().stream()
+                .sorted(Comparator.comparing(ScheduledProcess::getId))
+                .map(p -> new ProcessResult(
+                        p.getId(),
+                        p.getBasePriority(),
+                        p.getArrivalTime(),
+                        p.getBurstTime(),
+                        Optional.ofNullable(p.getFinishTime()).orElse(0),
+                        p.getWaitingTime(),
+                        p.getTurnaroundTime()
+                ))
+                .toList();
+        resultsTable.setItems(FXCollections.observableArrayList(data));
+
+        VBox wrapper = new VBox(10, new Label("Итоги симуляции"), resultsTable);
+        wrapper.setPadding(new Insets(10));
+
+        Stage stage = new Stage();
+        stage.setTitle("Итоги симуляции");
+        stage.setScene(new Scene(wrapper, 700, 400));
+        stage.show();
+    }
+
+    private record ProcessResult(String id, int priority, int arrival, int burst,
+                                 int finish, int waiting, int turnaround) {
     }
 }
